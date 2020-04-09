@@ -15,7 +15,15 @@ const cli = meow(
 
 	Examples
 	  $ news-fragments new feature "New feature"
-`
+`,
+  {
+    flags: {
+      unreleased: {
+        type: "boolean",
+        alias: "u",
+      },
+    },
+  }
 );
 
 const invalidCommand = function () {
@@ -31,4 +39,4 @@ const commands = {
 };
 
 const command = commands[cli.input[0]] || invalidCommand;
-command(cli.input);
+command(cli.input, cli.flags);

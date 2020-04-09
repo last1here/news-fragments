@@ -14,6 +14,8 @@ const schema = Joi.object({
   changelogTemplate: Joi.string().required(),
   fragmentsFolder: Joi.string().required(),
   fragmentsTypes: Joi.array().items(fragmentsTypesSchema).required(),
+  unreleasedFragmentsInclude: Joi.bool(),
+  unreleasedFragmentsFolder: Joi.string(),
 });
 
 const changelogTemplate = `# [{{newVersion}}] - ({{bumpDate}})
@@ -37,6 +39,8 @@ const baseConfig = {
     { title: "Deprecations and Removals", extension: "removal" },
     { title: "Misc", extension: "misc" },
   ],
+  unreleasedFragmentsInclude: false,
+  unreleasedFragmentsFolder: "unreleased",
 };
 
 const buildConfig = function (config) {

@@ -4,60 +4,138 @@ const {
   saveChangelogToFile,
 } = require("./build-template");
 const { newsFragmentsUserConfig } = require("./config");
-const { deleteFragmentsFiles } = require("./file");
+const { deleteFragmentsFiles, moveFilesToFragmentsFolder } = require("./file");
 const { checkChangelogFile, checkFragmentsFolder } = require("./helpers");
 const {
   getFragmentsFilesByFragmentType,
   getFragmentsContent,
 } = require("./file");
 const { Plugin } = require("release-it");
+const path = require("path");
+
+const prompts = {
+  publish: {
+    type: "confirm",
+    message: (context) =>
+      `Publish ${context["news-fragments"].unreleasedFragmentCount} unreleased changelog entries?`,
+    default: false,
+  },
+  build: {
+    type: "confirm",
+    message: () => `Build changelog?`,
+    default: true,
+  },
+};
 
 class NewsFragments extends Plugin {
-  start() {
-    checkChangelogFile(this.baseConfig.changelogFile);
-    checkFragmentsFolder(this.baseConfig.fragmentsFolder);
+  constructor(...args) {
+    super(...args);
+    this.registerPrompts(prompts);
   }
+
   init() {
-    this.baseConfig = newsFragmentsUserConfig;
+    this.setContext(newsFragmentsUserConfig);
 
-    this.start();
+    checkChangelogFile(this.context.changelogFile);
+    checkFragmentsFolder(this.context.fragmentsFolder);
 
-    this.fragmentsToBurn = [];
-    this.fragmentsToDelete = [];
+    this.getUnreleasedCount();
+  }
 
-    this.baseConfig.fragmentsTypes.forEach((fragmentType) => {
+  getUnreleasedCount() {
+    const unreleasedFragmentCount = this.context.fragmentsTypes
+      .map((fragmentType) => {
+        return getFragmentsFilesByFragmentType(
+          path.join(
+            this.context.fragmentsFolder,
+            this.context.unreleasedFragmentsFolder
+          ),
+          fragmentType.extension
+        ).length;
+      })
+      .reduce((a, b) => a + b, 0);
+
+    this.setContext({
+      unreleasedFragmentCount: unreleasedFragmentCount,
+    });
+  }
+
+  async release() {
+    const {
+      unreleasedFragmentCount,
+      unreleasedFragmentsInclude,
+      version,
+    } = this.getContext();
+
+    await this.step({
+      enabled: unreleasedFragmentCount > 0 && !unreleasedFragmentsInclude,
+      task: () => this.moveUnreleased(),
+      label: "Include unreleased",
+      prompt: "publish",
+    });
+
+    this.buildChangelog(version);
+  }
+
+  moveUnreleased() {
+    this.setContext({
+      unreleasedFragmentsInclude: true,
+    });
+  }
+
+  buildChangelog(version) {
+    const { unreleasedFragmentsInclude } = this.getContext();
+    let fragmentsToBurn = [];
+    let fragmentsToDelete = [];
+
+    this.context.fragmentsTypes.forEach((fragmentType) => {
       const fragmentsEncountered = getFragmentsFilesByFragmentType(
-        this.baseConfig.fragmentsFolder,
+        this.context.fragmentsFolder,
         fragmentType.extension
       );
 
-      this.fragmentsToDelete = [
-        ...this.fragmentsToDelete,
-        ...fragmentsEncountered,
-      ];
+      if (unreleasedFragmentsInclude) {
+        const unreleasedfragments = getFragmentsFilesByFragmentType(
+          path.join(
+            this.context.fragmentsFolder,
+            this.context.unreleasedFragmentsFolder
+          ),
+          fragmentType.extension
+        );
+        fragmentsEncountered.push(...unreleasedfragments);
+      }
+
+      fragmentsToDelete.push(...fragmentsEncountered);
 
       const fragmentEntries = getFragmentsContent(fragmentsEncountered);
 
       if (fragmentEntries.length > 0) {
-        this.fragmentsToBurn.push({
+        fragmentsToBurn.push({
           title: fragmentType.title,
           fragmentEntries,
         });
       }
     });
-  }
-  bump(version) {
+
+    this.log.info(`Publishing ${fragmentsToDelete.length} changelog entries.`);
+
     const templateData = generateTemplateData(
       version,
-      this.baseConfig.changelogDateFormat,
-      this.fragmentsToBurn
+      this.context.changelogDateFormat,
+      fragmentsToBurn
     );
     const renderedTemplate = renderTemplate(
-      this.baseConfig.changelogTemplate,
+      this.context.changelogTemplate,
       templateData
     );
-    saveChangelogToFile(this.baseConfig.changelogFile, renderedTemplate);
-    deleteFragmentsFiles(this.fragmentsToDelete);
+    saveChangelogToFile(this.context.changelogFile, renderedTemplate);
+    deleteFragmentsFiles(fragmentsToDelete);
+  }
+
+  bump(version) {
+    this.setContext({
+      version,
+    });
   }
 }
 
